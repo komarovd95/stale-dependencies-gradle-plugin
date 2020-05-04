@@ -12,4 +12,6 @@ This plugin uses ASM to visit compiled Kotlin code so all `check*StaleDependenci
 
 This plugin contains master-task `checkStaleDependencies` that depends on all `check*StaleDependencies` tasks. 
 You should use this task if you want to fail your build in case of rules violations.
+
+All `check*StaleDependencies` tasks support caching and incremental builds.
    
