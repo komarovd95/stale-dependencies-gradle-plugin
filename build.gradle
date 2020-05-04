@@ -1,0 +1,47 @@
+plugins {
+    id 'org.jetbrains.kotlin.jvm' version '1.3.71'
+    id 'java-gradle-plugin'
+}
+
+group 'com.github.komarovd95'
+version '0.0.1-SNAPSHOT'
+
+gradlePlugin {
+    plugins {
+        staleDependenciesPlugin {
+            id = "com.github.komarovd95.stale-dependencies-plugin"
+            displayName = "stale-dependencies-plugin"
+            description = "A Gradle plugin that finds stale and unused dependencies in your Kotlin projects"
+            implementationClass = "com.github.komarovd95.staledependencies.StaleDependenciesPlugin"
+        }
+    }
+}
+
+repositories {
+    mavenCentral()
+    jcenter()
+}
+
+dependencies {
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8"
+    implementation "org.jetbrains.kotlin:kotlin-gradle-plugin"
+    implementation "org.ow2.asm:asm:8.0.1"
+    compileOnly gradleApi()
+
+    testCompileOnly gradleTestKit()
+    testImplementation "org.junit.jupiter:junit-jupiter:5.6.2"
+}
+
+compileKotlin {
+    kotlinOptions.jvmTarget = "1.8"
+}
+compileTestKotlin {
+    kotlinOptions.jvmTarget = "1.8"
+}
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        events("passed", "skipped", "failed")
+    }
+}
