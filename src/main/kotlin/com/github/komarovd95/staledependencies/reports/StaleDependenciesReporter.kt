@@ -97,7 +97,7 @@ object StaleDependenciesReporter {
 
     fun loadClassesDependencies(file: File): MutableMap<String, MutableSet<DependencyId>> {
         return if (file.exists()) {
-            val result = mutableMapOf<String, MutableSet<DependencyId>>()
+            val result = LinkedHashMap<String, MutableSet<DependencyId>>()
             val xmlDocument = file.parseXmlDocument()
             val dependencies = xmlDocument.getElementsByTagName(DEPENDENCIES_TAG_NAME).item(0).childNodes
             for (i in 0 until dependencies.length) {
@@ -107,12 +107,12 @@ object StaleDependenciesReporter {
             }
             result
         } else {
-            mutableMapOf()
+            LinkedHashMap()
         }
     }
 
     private fun findDependencies(node: Node): MutableSet<DependencyId> {
-        val result = mutableSetOf<DependencyId>()
+        val result = LinkedHashSet<DependencyId>()
         val children = node.childNodes
         for (i in 0 until children.length) {
             val dependency = children.item(i)

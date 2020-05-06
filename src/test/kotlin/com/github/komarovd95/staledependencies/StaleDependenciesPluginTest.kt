@@ -417,7 +417,7 @@ class StaleDependenciesPluginTest {
             it.path == ":checkTestStaleDependencies"
         }
         Assertions.assertNotNull(incrementalCheckTestStaleDependenciesTask)
-        Assertions.assertEquals(TaskOutcome.UP_TO_DATE, incrementalCheckTestStaleDependenciesTask?.outcome)
+        Assertions.assertEquals(TaskOutcome.SUCCESS, incrementalCheckTestStaleDependenciesTask?.outcome)
 
         val incrementalMainClassReferences = folder.resolve("build/stale-dependencies/main-classes-references.xml")
         val incrementalMainViolations = StaleDependenciesReporter.loadViolations(incrementalMainClassReferences.toFile())
@@ -463,29 +463,227 @@ class StaleDependenciesPluginTest {
         )
     }
 
+    @Test
+    fun `should failed with unused dependency when build file is changed`(@TempDir folder: Path) {
+        folder.initProject(
+            "implementation" to JSON_SMART_DEPENDENCY,
+            "testImplementation" to HAMCREST_DEPENDENCY
+        )
+
+        val buildResult = GradleRunner.create()
+            .withProjectDir(folder.toFile())
+            .withArguments("checkStaleDependencies", "-info", "--stacktrace")
+            .withPluginClasspath()
+            .forwardOutput()
+            .build()
+
+        val checkMainStaleDependenciesTask = buildResult.tasks.find {
+            it.path == ":checkMainStaleDependencies"
+        }
+        Assertions.assertNotNull(checkMainStaleDependenciesTask)
+        Assertions.assertEquals(TaskOutcome.SUCCESS, checkMainStaleDependenciesTask?.outcome)
+
+        val checkTestStaleDependenciesTask = buildResult.tasks.find {
+            it.path == ":checkTestStaleDependencies"
+        }
+        Assertions.assertNotNull(checkTestStaleDependenciesTask)
+        Assertions.assertEquals(TaskOutcome.SUCCESS, checkTestStaleDependenciesTask?.outcome)
+
+        val mainClassReferences = folder.resolve("build/stale-dependencies/main-classes-references.xml")
+        Assertions.assertEquals(
+            emptyList<StaleDependencyViolation>(),
+            StaleDependenciesReporter.loadViolations(mainClassReferences.toFile())
+        )
+        Assertions.assertEquals(
+            mapOf(
+                "com.github.komarovd95.staledependencies.testproject.A" to setOf(
+                    DependencyId(groupId = "org.jetbrains.kotlin", moduleId = "kotlin-stdlib"),
+                    DependencyId(groupId = "org.jetbrains", moduleId = "annotations")
+                ),
+                "com.github.komarovd95.staledependencies.testproject.A\$Companion" to setOf(
+                    DependencyId(groupId = "org.jetbrains.kotlin", moduleId = "kotlin-stdlib"),
+                    DependencyId(groupId = "org.jetbrains", moduleId = "annotations"),
+                    DependencyId(groupId = "net.minidev", moduleId = "json-smart")
+                ),
+                "com.github.komarovd95.staledependencies.testproject.B" to setOf(
+                    DependencyId(groupId = "org.jetbrains.kotlin", moduleId = "kotlin-stdlib"),
+                    DependencyId(groupId = "org.jetbrains", moduleId = "annotations")
+                ),
+                "com.github.komarovd95.staledependencies.testproject.B\$Companion" to setOf(
+                    DependencyId(groupId = "org.jetbrains.kotlin", moduleId = "kotlin-stdlib"),
+                    DependencyId(groupId = "org.jetbrains", moduleId = "annotations")
+                )
+            ),
+            StaleDependenciesReporter.loadClassesDependencies(mainClassReferences.toFile())
+        )
+
+        val testClassReferences = folder.resolve("build/stale-dependencies/test-classes-references.xml")
+        Assertions.assertEquals(
+            emptyList<StaleDependencyViolation>(),
+            StaleDependenciesReporter.loadViolations(testClassReferences.toFile())
+        )
+        Assertions.assertEquals(
+            mapOf(
+                "com.github.komarovd95.staledependencies.testproject.SimpleTest" to setOf(
+                    DependencyId(groupId = "org.jetbrains.kotlin", moduleId = "kotlin-stdlib"),
+                    DependencyId(groupId = "org.jetbrains", moduleId = "annotations")
+                ),
+                "com.github.komarovd95.staledependencies.testproject.SimpleTest\$Companion" to setOf(
+                    DependencyId(groupId = "org.jetbrains.kotlin", moduleId = "kotlin-stdlib"),
+                    DependencyId(groupId = "org.jetbrains", moduleId = "annotations"),
+                    DependencyId(groupId = "org.hamcrest", moduleId = "hamcrest")
+                )
+            ),
+            StaleDependenciesReporter.loadClassesDependencies(testClassReferences.toFile())
+        )
+
+        folder.resolve("build.gradle").writeBuildGradle(
+            "implementation" to JSON_SMART_DEPENDENCY,
+            "testImplementation" to JSON_PATH_DEPENDENCY,
+            "testImplementation" to HAMCREST_DEPENDENCY
+        )
+
+        val incrementalBuildResult = GradleRunner.create()
+            .withProjectDir(folder.toFile())
+            .withArguments("checkStaleDependencies", "-info", "--stacktrace")
+            .withPluginClasspath()
+            .forwardOutput()
+            .buildAndFail()
+
+        val incrementalCheckMainStaleDependenciesTask = incrementalBuildResult.tasks.find {
+            it.path == ":checkMainStaleDependencies"
+        }
+        Assertions.assertNotNull(incrementalCheckMainStaleDependenciesTask)
+        Assertions.assertEquals(TaskOutcome.UP_TO_DATE, incrementalCheckMainStaleDependenciesTask?.outcome)
+
+        val incrementalCheckTestStaleDependenciesTask = incrementalBuildResult.tasks.find {
+            it.path == ":checkTestStaleDependencies"
+        }
+        Assertions.assertNotNull(incrementalCheckTestStaleDependenciesTask)
+        Assertions.assertEquals(TaskOutcome.SUCCESS, incrementalCheckTestStaleDependenciesTask?.outcome)
+
+        val incrementalTestClassReferences = folder.resolve("build/stale-dependencies/test-classes-references.xml")
+        val incrementalTestViolations = StaleDependenciesReporter.loadViolations(incrementalTestClassReferences.toFile())
+        Assertions.assertEquals(1, incrementalTestViolations.size)
+        Assertions.assertTrue(incrementalTestViolations[0] is UnusedDependencyViolation)
+        with(incrementalTestViolations[0] as UnusedDependencyViolation) {
+            Assertions.assertEquals("testImplementation", this.declaredDependency.configurationName)
+            Assertions.assertEquals("com.jayway.jsonpath", this.declaredDependency.id.groupId)
+            Assertions.assertEquals("json-path", this.declaredDependency.id.moduleId)
+        }
+        Assertions.assertEquals(
+            mapOf(
+                "com.github.komarovd95.staledependencies.testproject.SimpleTest" to setOf(
+                    DependencyId(groupId = "org.jetbrains.kotlin", moduleId = "kotlin-stdlib"),
+                    DependencyId(groupId = "org.jetbrains", moduleId = "annotations")
+                ),
+                "com.github.komarovd95.staledependencies.testproject.SimpleTest\$Companion" to setOf(
+                    DependencyId(groupId = "org.jetbrains.kotlin", moduleId = "kotlin-stdlib"),
+                    DependencyId(groupId = "org.jetbrains", moduleId = "annotations"),
+                    DependencyId(groupId = "org.hamcrest", moduleId = "hamcrest")
+                )
+            ),
+            StaleDependenciesReporter.loadClassesDependencies(incrementalTestClassReferences.toFile())
+        )
+    }
+
+    @Test
+    fun `should do nothing when nothing was changed`(@TempDir folder: Path) {
+        folder.initProject(
+            "implementation" to JSON_SMART_DEPENDENCY,
+            "testImplementation" to HAMCREST_DEPENDENCY
+        )
+
+        val buildResult = GradleRunner.create()
+            .withProjectDir(folder.toFile())
+            .withArguments("checkStaleDependencies", "-info", "--stacktrace")
+            .withPluginClasspath()
+            .forwardOutput()
+            .build()
+
+        val checkMainStaleDependenciesTask = buildResult.tasks.find {
+            it.path == ":checkMainStaleDependencies"
+        }
+        Assertions.assertNotNull(checkMainStaleDependenciesTask)
+        Assertions.assertEquals(TaskOutcome.SUCCESS, checkMainStaleDependenciesTask?.outcome)
+
+        val checkTestStaleDependenciesTask = buildResult.tasks.find {
+            it.path == ":checkTestStaleDependencies"
+        }
+        Assertions.assertNotNull(checkTestStaleDependenciesTask)
+        Assertions.assertEquals(TaskOutcome.SUCCESS, checkTestStaleDependenciesTask?.outcome)
+
+        val mainClassReferences = folder.resolve("build/stale-dependencies/main-classes-references.xml")
+        Assertions.assertEquals(
+            emptyList<StaleDependencyViolation>(),
+            StaleDependenciesReporter.loadViolations(mainClassReferences.toFile())
+        )
+        Assertions.assertEquals(
+            mapOf(
+                "com.github.komarovd95.staledependencies.testproject.A" to setOf(
+                    DependencyId(groupId = "org.jetbrains.kotlin", moduleId = "kotlin-stdlib"),
+                    DependencyId(groupId = "org.jetbrains", moduleId = "annotations")
+                ),
+                "com.github.komarovd95.staledependencies.testproject.A\$Companion" to setOf(
+                    DependencyId(groupId = "org.jetbrains.kotlin", moduleId = "kotlin-stdlib"),
+                    DependencyId(groupId = "org.jetbrains", moduleId = "annotations"),
+                    DependencyId(groupId = "net.minidev", moduleId = "json-smart")
+                ),
+                "com.github.komarovd95.staledependencies.testproject.B" to setOf(
+                    DependencyId(groupId = "org.jetbrains.kotlin", moduleId = "kotlin-stdlib"),
+                    DependencyId(groupId = "org.jetbrains", moduleId = "annotations")
+                ),
+                "com.github.komarovd95.staledependencies.testproject.B\$Companion" to setOf(
+                    DependencyId(groupId = "org.jetbrains.kotlin", moduleId = "kotlin-stdlib"),
+                    DependencyId(groupId = "org.jetbrains", moduleId = "annotations")
+                )
+            ),
+            StaleDependenciesReporter.loadClassesDependencies(mainClassReferences.toFile())
+        )
+
+        val testClassReferences = folder.resolve("build/stale-dependencies/test-classes-references.xml")
+        Assertions.assertEquals(
+            emptyList<StaleDependencyViolation>(),
+            StaleDependenciesReporter.loadViolations(testClassReferences.toFile())
+        )
+        Assertions.assertEquals(
+            mapOf(
+                "com.github.komarovd95.staledependencies.testproject.SimpleTest" to setOf(
+                    DependencyId(groupId = "org.jetbrains.kotlin", moduleId = "kotlin-stdlib"),
+                    DependencyId(groupId = "org.jetbrains", moduleId = "annotations")
+                ),
+                "com.github.komarovd95.staledependencies.testproject.SimpleTest\$Companion" to setOf(
+                    DependencyId(groupId = "org.jetbrains.kotlin", moduleId = "kotlin-stdlib"),
+                    DependencyId(groupId = "org.jetbrains", moduleId = "annotations"),
+                    DependencyId(groupId = "org.hamcrest", moduleId = "hamcrest")
+                )
+            ),
+            StaleDependenciesReporter.loadClassesDependencies(testClassReferences.toFile())
+        )
+
+        val incrementalBuildResult = GradleRunner.create()
+            .withProjectDir(folder.toFile())
+            .withArguments("checkStaleDependencies", "-info", "--stacktrace")
+            .withPluginClasspath()
+            .forwardOutput()
+            .build()
+
+        val incrementalCheckMainStaleDependenciesTask = incrementalBuildResult.tasks.find {
+            it.path == ":checkMainStaleDependencies"
+        }
+        Assertions.assertNotNull(incrementalCheckMainStaleDependenciesTask)
+        Assertions.assertEquals(TaskOutcome.UP_TO_DATE, incrementalCheckMainStaleDependenciesTask?.outcome)
+
+        val incrementalCheckTestStaleDependenciesTask = incrementalBuildResult.tasks.find {
+            it.path == ":checkTestStaleDependencies"
+        }
+        Assertions.assertNotNull(incrementalCheckTestStaleDependenciesTask)
+        Assertions.assertEquals(TaskOutcome.UP_TO_DATE, incrementalCheckTestStaleDependenciesTask?.outcome)
+    }
+
     private fun Path.initProject(vararg dependencies: Pair<String, String>): Path {
         val buildFile = Files.createFile(this.resolve("build.gradle"))
-        buildFile.toFile().writeText("""
-            plugins {
-                id 'org.jetbrains.kotlin.jvm' version '1.3.71'
-                id 'com.github.komarovd95.stale-dependencies-plugin'
-            }
-            repositories {
-                mavenCentral()
-                jcenter()
-            }
-            dependencies {
-                implementation 'org.jetbrains.kotlin:kotlin-stdlib-jdk8'
-            ${dependencies.joinToString(separator = "\n") { "\t${it.first} '${it.second}'" }}
-            }
-            compileKotlin {
-                kotlinOptions.jvmTarget = "1.8"
-            }
-            compileTestKotlin {
-                kotlinOptions.jvmTarget = "1.8"
-            }
-            
-        """.trimIndent())
+        buildFile.writeBuildGradle(*dependencies)
 
         val mainSourceDirectory = Files.createDirectories(
             this.resolve("src/main/kotlin/com/github/komarovd95/staledependencies/testproject")
@@ -546,6 +744,30 @@ class StaleDependenciesPluginTest {
         """.trimIndent())
 
         return this
+    }
+
+    private fun Path.writeBuildGradle(vararg dependencies: Pair<String, String>) {
+        this.toFile().writeText("""
+            plugins {
+                id 'org.jetbrains.kotlin.jvm' version '1.3.71'
+                id 'com.github.komarovd95.stale-dependencies-plugin'
+            }
+            repositories {
+                mavenCentral()
+                jcenter()
+            }
+            dependencies {
+                implementation 'org.jetbrains.kotlin:kotlin-stdlib-jdk8'
+            ${dependencies.joinToString(separator = "\n") { "\t${it.first} '${it.second}'" }}
+            }
+            compileKotlin {
+                kotlinOptions.jvmTarget = "1.8"
+            }
+            compileTestKotlin {
+                kotlinOptions.jvmTarget = "1.8"
+            }
+            
+        """.trimIndent())
     }
 
     private fun Path.withExcludedSourceSets(vararg excludedSourceSets: String) {

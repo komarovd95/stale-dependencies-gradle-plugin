@@ -12,36 +12,12 @@ import org.objectweb.asm.Type
 import org.objectweb.asm.TypePath
 import org.objectweb.asm.signature.SignatureReader
 import org.objectweb.asm.signature.SignatureVisitor
-import java.util.HashSet
 
 class DependencyClassVisitor(
-        private val classesToArtifacts: Map<String, Set<ResolvedArtifact>>,
-        private val classLoader: ClassLoader
+        private val classesToArtifacts: Map<String, Set<ResolvedArtifact>>
 ) : ClassVisitor(Opcodes.ASM8) {
 
-    val dependencies = mutableSetOf<ResolvedArtifact>()
-
-    private fun checkTypeHierarchy(className: String) {
-        val clazz = Class.forName(className.replace('/', '.'), false, classLoader)
-        typeHierarchy(clazz).forEach {
-            addDependencies(it.name.replace('.', '/'))
-        }
-    }
-
-    private fun typeHierarchy(clazz: Class<*>): Set<Class<*>> {
-        if (clazz.name.startsWith("java.") || clazz.name.startsWith("kotlin.")) {
-            return emptySet()
-        }
-
-        val classes: MutableSet<Class<*>> = HashSet()
-        if (clazz.superclass != null) {
-            classes.addAll(typeHierarchy(clazz.superclass))
-        }
-        for (iface in clazz.interfaces) {
-            classes.addAll(typeHierarchy(iface))
-        }
-        return classes
-    }
+    val dependencies = LinkedHashSet<ResolvedArtifact>()
 
     private fun checkType(descriptor: String) {
         val type = Type.getType(descriptor)
@@ -60,7 +36,14 @@ class DependencyClassVisitor(
             superName: String?,
             interfaces: Array<String?>?
     ) {
-        checkTypeHierarchy(name)
+        if (superName != null) {
+            addDependencies(superName)
+        }
+        interfaces?.forEach { iface ->
+            if (iface != null) {
+                addDependencies(iface)
+            }
+        }
         if (signature != null) {
             SignatureReader(signature).accept(DependencySignatureVisitor())
         }

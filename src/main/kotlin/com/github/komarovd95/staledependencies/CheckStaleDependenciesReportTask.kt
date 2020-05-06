@@ -10,11 +10,13 @@ import java.io.File
 open class CheckStaleDependenciesReportTask : DefaultTask() {
 
     @get:Input
-    lateinit var reportFiles: List<File>
+    lateinit var reportFilesDirectory: File
 
     @TaskAction
     fun report() {
-        val violations = reportFiles.flatMap { StaleDependenciesReporter.loadViolations(it) }
+        val violations = reportFilesDirectory.listFiles()?.flatMap {
+            StaleDependenciesReporter.loadViolations(it)
+        } ?: emptyList()
         if (violations.isNotEmpty()) {
             throw GradleException(violations.joinToString(separator = "\n") { it.asString() })
         }

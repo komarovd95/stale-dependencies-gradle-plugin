@@ -6,7 +6,6 @@ import com.github.komarovd95.staledependencies.violations.StaleDependencyViolati
 import com.github.komarovd95.staledependencies.violations.TransitiveDependencyUsageViolation
 import com.github.komarovd95.staledependencies.violations.UnusedDependencyViolation
 import org.gradle.api.DefaultTask
-import org.gradle.api.GradleException
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.ResolvedArtifact
 import org.gradle.api.artifacts.ResolvedConfiguration
@@ -16,22 +15,13 @@ import org.gradle.api.file.FileCollection
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.internal.artifacts.DefaultModuleIdentifier
 import org.gradle.api.provider.Property
-import org.gradle.api.tasks.CacheableTask
-import org.gradle.api.tasks.Input
-import org.gradle.api.tasks.InputDirectory
-import org.gradle.api.tasks.Internal
-import org.gradle.api.tasks.OutputFile
-import org.gradle.api.tasks.PathSensitive
-import org.gradle.api.tasks.PathSensitivity
-import org.gradle.api.tasks.StopExecutionException
-import org.gradle.api.tasks.TaskAction
+import org.gradle.api.tasks.*
 import org.gradle.work.ChangeType
 import org.gradle.work.FileChange
 import org.gradle.work.Incremental
 import org.gradle.work.InputChanges
 import org.objectweb.asm.ClassReader
 import java.io.File
-import java.net.URLClassLoader
 
 @CacheableTask
 abstract class CheckStaleDependenciesTask : DefaultTask() {
@@ -47,6 +37,11 @@ abstract class CheckStaleDependenciesTask : DefaultTask() {
     @get:PathSensitive(PathSensitivity.NAME_ONLY)
     @get:InputDirectory
     abstract val compiledClassesDirectory: DirectoryProperty
+
+    @get:Incremental
+    @get:Classpath
+    @get:InputFiles
+    abstract val classpath: Property<FileCollection>
 
     @get:OutputFile
     abstract val reportFile: RegularFileProperty
@@ -64,10 +59,11 @@ abstract class CheckStaleDependenciesTask : DefaultTask() {
         project.logger.info("Checking stale dependencies: sourceSet=${sourceSetName.get()}, " +
                 "incrementally=${inputChanges.isIncremental}")
 
-        val changes = inputChanges.getFileChanges(compiledClassesDirectory)
-                .filter { it.file.name.endsWith(".class")}
-        if (changes.isEmpty()) {
-            throw StopExecutionException("No incrementally changed classes were found")
+        val changedCompiledClasses = inputChanges.getFileChanges(compiledClassesDirectory)
+            .filter { it.file.name.endsWith(".class")}
+
+        if (!inputChanges.isIncremental && changedCompiledClasses.isEmpty()) {
+            throw StopExecutionException("No incrementally changed files were found")
         }
         val configuration = project.findCompileClasspathConfiguration(sourceSetName.get())
         if (configuration == null || configuration.state != Configuration.State.RESOLVED) {
@@ -75,13 +71,9 @@ abstract class CheckStaleDependenciesTask : DefaultTask() {
         }
         val resolvedConfiguration = configuration.resolvedConfiguration
 
-        val compileTask = (project.findKotlinCompileTask(sourceSetName.get())
-                ?: throw GradleException("Kotlin compile task not found for sourceSet=${sourceSetName.get()}"))
-
         val classesFromArtifacts = ArtifactsHelper.classesToArtifacts(resolvedConfiguration.resolvedArtifacts)
-        val classLoader = createClassLoader(compileTask.classpath)
 
-        changes.forEach { onCompiledClassChanged(it, classesFromArtifacts, classLoader) }
+        changedCompiledClasses.forEach { onCompiledClassChanged(it, classesFromArtifacts) }
 
         val declaredDependencies = declaredDependencies(resolvedConfiguration)
         val violations = checkForStaleDependencyViolations(declaredDependencies, resolvedConfiguration)
@@ -90,15 +82,6 @@ abstract class CheckStaleDependenciesTask : DefaultTask() {
                 sourceSetName.get(),
                 classesDependencies,
                 violations
-        )
-    }
-
-    private fun createClassLoader(classpath: FileCollection): ClassLoader {
-        return URLClassLoader(
-                (classpath.files + compiledClassesDirectory.get().asFile)
-                        .map { it.toURI().toURL() }
-                        .toTypedArray(),
-                null
         )
     }
 
@@ -144,27 +127,25 @@ abstract class CheckStaleDependenciesTask : DefaultTask() {
 
     private fun onCompiledClassChanged(
             change: FileChange,
-            classesToArtifacts: Map<String, Set<ResolvedArtifact>>,
-            classLoader: ClassLoader
+            classesToArtifacts: Map<String, Set<ResolvedArtifact>>
     ) {
         when (change.changeType) {
             ChangeType.REMOVED -> { classesDependencies.remove(change.file.toClassName()) }
-            else -> { classModified(change.file, classesToArtifacts, classLoader) }
+            else -> { classModified(change.file, classesToArtifacts) }
         }
     }
 
     private fun classModified(
             file: File,
-            classesToArtifacts: Map<String, Set<ResolvedArtifact>>,
-            classLoader: ClassLoader
+            classesToArtifacts: Map<String, Set<ResolvedArtifact>>
     ) {
-        val classVisitor = DependencyClassVisitor(classesToArtifacts, classLoader)
+        val classVisitor = DependencyClassVisitor(classesToArtifacts)
         file.inputStream().use {
             ClassReader(it).accept(classVisitor, ClassReader.SKIP_DEBUG)
         }
         val ids = classVisitor.dependencies.map { it.toDependencyId() }
         classesDependencies.compute(file.toClassName()) { _, oldValue ->
-            val value = oldValue ?: mutableSetOf()
+            val value = oldValue ?: LinkedHashSet()
             value.addAll(ids)
             value
         }
