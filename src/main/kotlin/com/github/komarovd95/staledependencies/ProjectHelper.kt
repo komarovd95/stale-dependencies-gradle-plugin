@@ -5,6 +5,8 @@ import org.gradle.api.UnknownTaskException
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.tasks.SourceSet
 import org.gradle.api.tasks.TaskProvider
+import org.jetbrains.kotlin.gradle.dsl.KotlinProjectExtension
+import org.jetbrains.kotlin.gradle.plugin.KotlinSourceSet
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 fun Project.findKotlinCompileTask(sourceSetName: String): TaskProvider<KotlinCompile>? {
@@ -26,19 +28,9 @@ fun Project.findCompileClasspathConfiguration(sourceSetName: String): Configurat
     return configurations.findByName("${sourceSetName}CompileClasspath")
 }
 
-fun Project.findCompileConfigurations(sourceSetName: String): List<Configuration> {
-    val configurations = if (sourceSetName == SourceSet.MAIN_SOURCE_SET_NAME) {
-        listOf(
-                configurations.findByName("compile"),
-                configurations.findByName("compileOnly"),
-                configurations.findByName("implementation")
-        )
-    } else {
-        listOf(
-                configurations.findByName("${sourceSetName}Compile"),
-                configurations.findByName("${sourceSetName}CompileOnly"),
-                configurations.findByName("${sourceSetName}Implementation")
-        )
-    }
-    return configurations.filterNotNull()
+fun Project.findKotlinSourceSet(configuration: Configuration): KotlinSourceSet? {
+    val kotlinExtension = extensions.getByType(KotlinProjectExtension::class.java)
+    return kotlinExtension.sourceSets.firstOrNull {
+        configuration.name in it.relatedConfigurationNames
+    } ?: configurations.firstOrNull { conf -> configuration in conf.extendsFrom }?.let { conf -> findKotlinSourceSet(conf) }
 }

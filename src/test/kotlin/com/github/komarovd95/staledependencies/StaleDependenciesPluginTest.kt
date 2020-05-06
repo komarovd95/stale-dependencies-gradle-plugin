@@ -178,6 +178,108 @@ class StaleDependenciesPluginTest {
     }
 
     @Test
+    fun `should failed with unused violation in custom configuration`(@TempDir folder: Path) {
+        folder.initProject()
+        folder.resolve("build.gradle").toFile().writeText("""
+            plugins {
+                id 'org.jetbrains.kotlin.jvm' version '1.3.71'
+                id 'com.github.komarovd95.stale-dependencies-plugin'
+            }
+            repositories {
+                mavenCentral()
+                jcenter()
+            }
+            configurations {
+                custom
+                implementation.extendsFrom(custom)
+            }
+            dependencies {
+                implementation 'org.jetbrains.kotlin:kotlin-stdlib-jdk8'
+                implementation '$JSON_SMART_DEPENDENCY'
+                custom '$COMMONS_IO_DEPENDENCY'
+                testImplementation '$HAMCREST_DEPENDENCY'
+            }
+            compileKotlin {
+                kotlinOptions.jvmTarget = "1.8"
+            }
+            compileTestKotlin {
+                kotlinOptions.jvmTarget = "1.8"
+            }
+        """.trimIndent())
+
+        val buildResult = GradleRunner.create()
+            .withProjectDir(folder.toFile())
+            .withArguments("checkStaleDependencies", "-info", "--stacktrace")
+            .withPluginClasspath()
+            .forwardOutput()
+            .buildAndFail()
+
+        val checkMainStaleDependenciesTask = buildResult.tasks.find {
+            it.path == ":checkMainStaleDependencies"
+        }
+        Assertions.assertNotNull(checkMainStaleDependenciesTask)
+        Assertions.assertEquals(TaskOutcome.SUCCESS, checkMainStaleDependenciesTask?.outcome)
+
+        val checkTestStaleDependenciesTask = buildResult.tasks.find {
+            it.path == ":checkTestStaleDependencies"
+        }
+        Assertions.assertNotNull(checkTestStaleDependenciesTask)
+        Assertions.assertEquals(TaskOutcome.SUCCESS, checkTestStaleDependenciesTask?.outcome)
+
+        val mainClassReferences = folder.resolve("build/stale-dependencies/main-classes-references.xml")
+        val mainViolations = StaleDependenciesReporter.loadViolations(mainClassReferences.toFile())
+        Assertions.assertEquals(1, mainViolations.size)
+        Assertions.assertTrue(mainViolations[0] is UnusedDependencyViolation)
+        with(mainViolations[0] as UnusedDependencyViolation) {
+            Assertions.assertEquals("custom", this.declaredDependency.configurationName)
+            Assertions.assertEquals("commons-io", this.declaredDependency.id.groupId)
+            Assertions.assertEquals("commons-io", this.declaredDependency.id.moduleId)
+        }
+        Assertions.assertEquals(
+            mapOf(
+                "com.github.komarovd95.staledependencies.testproject.A" to setOf(
+                    DependencyId(groupId = "org.jetbrains.kotlin", moduleId = "kotlin-stdlib"),
+                    DependencyId(groupId = "org.jetbrains", moduleId = "annotations")
+                ),
+                "com.github.komarovd95.staledependencies.testproject.A\$Companion" to setOf(
+                    DependencyId(groupId = "org.jetbrains.kotlin", moduleId = "kotlin-stdlib"),
+                    DependencyId(groupId = "org.jetbrains", moduleId = "annotations"),
+                    DependencyId(groupId = "net.minidev", moduleId = "json-smart")
+                ),
+                "com.github.komarovd95.staledependencies.testproject.B" to setOf(
+                    DependencyId(groupId = "org.jetbrains.kotlin", moduleId = "kotlin-stdlib"),
+                    DependencyId(groupId = "org.jetbrains", moduleId = "annotations")
+                ),
+                "com.github.komarovd95.staledependencies.testproject.B\$Companion" to setOf(
+                    DependencyId(groupId = "org.jetbrains.kotlin", moduleId = "kotlin-stdlib"),
+                    DependencyId(groupId = "org.jetbrains", moduleId = "annotations")
+                )
+            ),
+            StaleDependenciesReporter.loadClassesDependencies(mainClassReferences.toFile())
+        )
+
+        val testClassReferences = folder.resolve("build/stale-dependencies/test-classes-references.xml")
+        Assertions.assertEquals(
+            emptyList<StaleDependencyViolation>(),
+            StaleDependenciesReporter.loadViolations(testClassReferences.toFile())
+        )
+        Assertions.assertEquals(
+            mapOf(
+                "com.github.komarovd95.staledependencies.testproject.SimpleTest" to setOf(
+                    DependencyId(groupId = "org.jetbrains.kotlin", moduleId = "kotlin-stdlib"),
+                    DependencyId(groupId = "org.jetbrains", moduleId = "annotations")
+                ),
+                "com.github.komarovd95.staledependencies.testproject.SimpleTest\$Companion" to setOf(
+                    DependencyId(groupId = "org.jetbrains.kotlin", moduleId = "kotlin-stdlib"),
+                    DependencyId(groupId = "org.jetbrains", moduleId = "annotations"),
+                    DependencyId(groupId = "org.hamcrest", moduleId = "hamcrest")
+                )
+            ),
+            StaleDependenciesReporter.loadClassesDependencies(testClassReferences.toFile())
+        )
+    }
+
+    @Test
     fun `should failed with transitive usage violation`(@TempDir folder: Path) {
         folder.initProject(
             "implementation" to JSON_PATH_DEPENDENCY,

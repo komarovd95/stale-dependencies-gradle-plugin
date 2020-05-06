@@ -75,7 +75,7 @@ abstract class CheckStaleDependenciesTask : DefaultTask() {
 
         changedCompiledClasses.forEach { onCompiledClassChanged(it, classesFromArtifacts) }
 
-        val declaredDependencies = declaredDependencies(resolvedConfiguration)
+        val declaredDependencies = declaredDependencies(configuration, resolvedConfiguration)
         val violations = checkForStaleDependencyViolations(declaredDependencies, resolvedConfiguration)
         StaleDependenciesReporter.createReportFile(
                 reportFile.get().asFile,
@@ -85,9 +85,13 @@ abstract class CheckStaleDependenciesTask : DefaultTask() {
         )
     }
 
-    private fun declaredDependencies(resolvedConfiguration: ResolvedConfiguration): Set<DeclaredDependency> {
+    private fun declaredDependencies(classpathConfiguration: Configuration, resolvedConfiguration: ResolvedConfiguration): Set<DeclaredDependency> {
         val firstLevelDependencies = resolvedConfiguration.firstLevelModuleDependencies
-        return project.findCompileConfigurations(sourceSetName.get())
+        return (classpathConfiguration.hierarchy - setOf(classpathConfiguration))
+                .filter { configuration ->
+                    val configurationSourceSet = project.findKotlinSourceSet(configuration)
+                    sourceSetName.get() == configurationSourceSet?.name
+                }
                 .flatMap { configuration ->
                     val configurationDependencies = configuration.dependencies
                             .filter { it.group != null }
